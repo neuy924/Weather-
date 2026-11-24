@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Weather vs. the last 10 years</title>
-<meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0e1217" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#5b97f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#080a2a" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Weather">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -18,12 +18,12 @@
 <body>
 <header class="top">
   <button id="place-btn" class="place" type="button" aria-label="Change place">
-    <span class="pin" aria-hidden="true">📍</span>
+    <span class="pin" aria-hidden="true"></span>
     <span><span id="place-name">Choose a place</span><small id="when"></small></span>
   </button>
   <div class="tools">
     <button id="units" type="button" aria-label="Switch units">°C</button>
-    <button id="refresh" type="button" aria-label="Refresh">↻</button>
+    <button id="refresh" type="button" aria-label="Refresh"></button>
   </div>
 </header>
 
@@ -32,6 +32,9 @@
 
   <div id="content" hidden>
     <section id="hero" class="card hero"></section>
+
+    <section id="wear"></section>
+    <section id="cond"></section>
 
     <section id="vs10" class="card verdict"></section>
     <section class="card" id="bandcard"><div id="band"></div></section>
@@ -46,6 +49,8 @@
       <p class="fine">Score bar = comfort 0–100. The Today row uses the hourly value for this hour, so it is like-for-like with past years and may differ slightly from the live reading above. <span id="updated"></span></p>
     </section>
 
+    <section id="cal" class="card"></section>
+
     <details class="card how">
       <summary>How the comparison works</summary>
       <ul>
@@ -53,19 +58,23 @@
         <li><b>Model offset:</b> today comes from forecast models, history from ERA5 reanalysis. Over the days where both exist (ERA5 lags about 5 days) the app measures the gap and adjusts today's value by it.</li>
         <li><b>Versus last week:</b> same hour on days 5–10 ago, from the same forecast model as today. The change is ranked against week-on-week changes over the last 10 years at this date, so the usual seasonal drift is accounted for.</li>
         <li><b>Comfort:</b> starts at 100. Feels-like loses 4 points per °C below 18°C and 6 per °C above 24°C. Rain costs 10–25, strong wind (over 25 km/h) up to 15, daytime cloud up to 8. It is ranked in the same 10-year pool. The weights are a judgement, not a standard.</li>
+        <li><b>Damp flag:</b> on if there is drizzle, rain or fog now, at least 0.2 mm in the last 6 hours, air within 1.5°C of its dew point while below 10°C, or visibility under 1 km. It is shown next to the comfort score and not weighted into it, because the evidence for humidity alone changing comfort in the cold is weak.</li>
+        <li><b>Frost / ice:</b> a rule of thumb over the next 6 hours. Surfaces are assumed up to 2°C colder than the air on clear, calm nights; ice needs that plus wet surfaces. It is not a measurement of road or path conditions.</li>
+        <li><b>What to wear:</b> uses the coldest feels-like from now to +6 hours, assumes walking pace and typical tolerance, and adds rain, gust, damp and ice notes. The bands are my judgement, not a standard.</li>
+        <li><b>Calibration:</b> votes use the 7-point sensation scale (−3 cold to +3 hot), judged in the clothes you normally wear. After 10 votes the app can propose a shift: your average vote divided by an assumed 0.25 steps per °C. You choose whether to apply it. It shifts the big “feels like to you” number, the clothing bands and the comfort score. The 10-year and last-week comparisons stay physical: a constant shift cancels out when you compare like with like.</li>
         <li><b>Limits:</b> neighbouring days are not independent, so the pool behaves like fewer than 450 hours. Ten years is a short baseline and a recent one: it shows what is normal lately, not against older climate. One hour can still be moved by a front arriving early or late.</li>
       </ul>
     </details>
 
-    <p class="fine credit">Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (history: Copernicus ERA5). Place names by BigDataCloud. Free, non-commercial use.</p>
+    <p class="fine credit">Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (history: Copernicus ERA5). Place names by BigDataCloud. Free, non-commercial use. Pixel fonts: Press Start 2P and VT323 (SIL Open Font License). All artwork is original.</p>
   </div>
 </main>
 
 <div id="sheet" class="sheet" hidden>
   <div class="panel">
-    <div class="ph"><h2>Choose a place</h2><button id="close" type="button" aria-label="Close">✕</button></div>
+    <div class="ph"><h2>Choose a place</h2><button id="close" type="button" aria-label="Close"></button></div>
     <p id="place-msg" class="msg" hidden></p>
-    <button id="gps" class="primary" type="button">📍 Use my location</button>
+    <button id="gps" class="primary" type="button">Use my location</button>
     <label class="srch"><span>Or search for a city</span>
       <input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="words" placeholder="e.g. Dublin">
     </label>
@@ -73,7 +82,21 @@
   </div>
 </div>
 
+<div id="vote" class="sheet" hidden>
+  <div class="panel">
+    <div class="ph"><h2>How does it feel?</h2><button id="vclose" type="button" aria-label="Close"></button></div>
+    <p id="vnote" class="fine"></p>
+    <h4>1. Right now, outside</h4>
+    <div class="scale"><button type="button" data-v="-3"><b>-3</b><span>cold</span></button><button type="button" data-v="-2"><b>-2</b><span>cool</span></button><button type="button" data-v="-1"><b>-1</b><span>sl. cool</span></button><button type="button" data-v="0"><b>0</b><span>neutral</span></button><button type="button" data-v="1"><b>+1</b><span>sl. warm</span></button><button type="button" data-v="2"><b>+2</b><span>warm</span></button><button type="button" data-v="3"><b>+3</b><span>hot</span></button></div>
+    <h4>2. Activity</h4>
+    <div class="seg"><button type="button" data-a="walking">Walking</button><button type="button" data-a="commuting">Commuting</button><button type="button" data-a="other">Other</button></div>
+    <p class="fine">Saved on this phone with the place and the weather at this hour.</p>
+    <button id="vsave" class="primary" type="button" disabled>Save vote</button>
+  </div>
+</div>
+
 <script src="logic.js"></script>
+<script src="sprites.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

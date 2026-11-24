@@ -153,7 +153,8 @@
       if (i == null) return null;
       var g = function (k) { var a = hourly[k]; return a && a[i] != null ? a[i] : null; };
       var s = { fl: g('apparent_temperature'), t: g('temperature_2m'), precip: g('precipitation'),
-        wind: g('wind_speed_10m'), cloud: g('cloud_cover'), code: g('weather_code'), isDay: g('is_day') };
+        wind: g('wind_speed_10m'), cloud: g('cloud_cover'), code: g('weather_code'), isDay: g('is_day'),
+        gust: g('wind_gusts_10m'), dew: g('dew_point_2m'), rh: g('relative_humidity_2m'), vis: g('visibility'), pop: g('precipitation_probability') };
       return s.fl == null || s.t == null ? null : s;
     };
   }
@@ -260,8 +261,9 @@
   }
 
   /* packs: array of per-year packs (null for failed years). today: sample from the forecast model. bias: from biasFrom. */
-  function analyze(packs, today, bias) {
+  function analyze(packs, today, bias, opts) {
     bias = bias || { t: 0, fl: 0 };
+    var shift = (opts && opts.flShift) || 0;   /* personal feels-like adjustment from calibration (deg C) */
     var pool = [], years = 0;
     packs.forEach(function (p) { if (p && p.s && p.s.length) { years++; p.s.forEach(function (x) { pool.push(x); }); } });
     if (pool.length < 60 || years < 5) return { ok: false, n: pool.length, years: years };
@@ -278,9 +280,9 @@
     /* comfort of today vs the same pool (feels-like adjusted to the target date/hour) */
     var cm = fit.fl;
     var cs = pool.map(function (x) {
-      return comfort({ fl: x.fl - cm.b * x.k - cm.c * x.j, precip: x.precip, wind: x.wind, cloud: x.cloud, isDay: x.isDay });
+      return comfort({ fl: x.fl - cm.b * x.k - cm.c * x.j + shift, precip: x.precip, wind: x.wind, cloud: x.cloud, isDay: x.isDay });
     });
-    var tc = comfort({ fl: out.fl.today, precip: today.precip, wind: today.wind, cloud: today.cloud, isDay: today.isDay });
+    var tc = comfort({ fl: out.fl.today + shift, precip: today.precip, wind: today.wind, cloud: today.cloud, isDay: today.isDay });
     var dc = dist(cs.map(function (c) { return c.score; }), tc.score);
     var pts = {};
     ['temp', 'rain', 'wind', 'cloud'].forEach(function (k) { pts[k] = mean(cs.map(function (c) { return c.pen[k]; })) - tc.pen[k]; });
@@ -289,7 +291,7 @@
     out.comfort = {
       score: tc.score, mean: dc.mean, sd: dc.sd, z: dc.z, pct: dc.pct, diff: tc.score - dc.mean, verdict: comfortLabel(dc.z),
       pts: pts, driver: Math.abs(pts[driver]) >= 2 ? driver : null, wetShare: wet,
-      todayWet: today.precip != null && today.precip >= 0.1
+      todayWet: today.precip != null && today.precip >= 0.1, shift: shift
     };
     return out;
   }
@@ -327,7 +329,164 @@
     return { key: warm ? 'warm3' : 'cold3', text: warm ? 'Much warmer than a week ago' : 'Much colder than a week ago' };
   }
 
+  /* =====================================================================
+     Nowcast: rain window, damp flag, frost/ice flag, what to wear (walking)
+     All thresholds are judgement calls (see index.html "How it works"), not standards.
+     ===================================================================== */
+  var WET_CODES = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 71, 73, 75, 77, 85, 86, 95, 96, 99];
+  var DAMP_CODES = [45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82];
+  var inList = function (list, v) { return v != null && list.indexOf(v) >= 0; };
+  var sumOf = function (a) { return a.reduce(function (x, y) { return x + y; }, 0); };
+
+  /* pick: makePicker(...) over the forecast hourly block (needs past_days and 2 forecast days).
+     Past window = the 6 hourly totals ending at the current hour; next window = the 6 hours after it. */
+  function nowcast(pick, y, m, d, h) {
+    var at = function (o) { return pick(stampAt(y, m, d, h + o, 0)); };
+    var cur = at(0);
+    if (!cur) return null;
+    var past = [], next = [], o;
+    for (o = -5; o <= 0; o++) past.push(at(o));
+    for (o = 1; o <= 6; o++) next.push(at(o));
+    var pv = past.filter(function (s) { return s && s.precip != null; });
+    var win = [cur].concat(next.filter(Boolean));       /* now + next 6 h */
+    var nx = next.filter(function (s) { return s && s.precip != null; });
+    var minFL = Infinity, minAt = null, minT = Infinity;
+    win.forEach(function (s, i) {
+      if (s.fl < minFL) { minFL = s.fl; minAt = i === 0 ? null : pad((h + next.indexOf(s) + 1) % 24) + ':00'; }
+      if (s.t < minT) minT = s.t;
+    });
+    var gusts = win.filter(function (s) { return s.gust != null; }).map(function (s) { return s.gust; });
+    var pops = next.filter(function (s) { return s && s.pop != null; }).map(function (s) { return s.pop; });
+    return {
+      cur: cur,
+      past6mm: pv.length >= 4 ? sumOf(pv.map(function (s) { return s.precip; })) : null,
+      next: {
+        n: next.filter(Boolean).length,
+        minFL: minFL, minAt: minAt, minT: minT,
+        gustMax: gusts.length ? Math.max.apply(null, gusts) : null,
+        precip: nx.length >= 4 ? sumOf(nx.map(function (s) { return s.precip; })) : null,
+        popMax: pops.length ? Math.max.apply(null, pops) : null,
+        wetSoon: win.some(function (s) { return inList(WET_CODES, s.code); }),
+        night: win.some(function (s) { return s.isDay === 0; })
+      }
+    };
+  }
+
+  /* Damp: any of these. Thresholds are mine; the evidence on humidity alone in the cold is weak,
+     so this is shown as a flag and is NOT weighted into the comfort score. */
+  function dampFlag(cur, nc) {
+    var r = [];
+    if (inList(DAMP_CODES, cur.code)) r.push({ k: cur.code === 45 || cur.code === 48 ? 'fog' : 'wet', code: cur.code });
+    if (nc.past6mm != null && nc.past6mm >= 0.2) r.push({ k: 'rain6', mm: nc.past6mm });
+    if (cur.t < 10) {
+      if (cur.dew != null && cur.t - cur.dew <= 1.5) r.push({ k: 'saturated', spread: cur.t - cur.dew, rh: cur.rh });
+      else if (cur.dew == null && cur.rh != null && cur.rh >= 92) r.push({ k: 'saturated', spread: null, rh: cur.rh });
+    }
+    if (cur.vis != null && cur.vis < 1000) r.push({ k: 'vis', m: cur.vis });
+    return { on: r.length > 0, reasons: r };
+  }
+
+  /* Frost/ice heuristic over now..+6 h. Surfaces can be colder than the 2 m air on clear, calm nights,
+     so the effective surface temperature is taken as air minus 2 C then. Not a measurement. */
+  function frostRisk(cur, nc) {
+    var n = nc.next, minT = Math.min(cur.t, n.minT);
+    var clearCalm = n.night && cur.cloud != null && cur.cloud <= 50 && (cur.wind == null || cur.wind <= 15);
+    var wetSurface = (nc.past6mm != null && nc.past6mm >= 0.1) || (n.precip != null && n.precip >= 0.1) || n.wetSoon ||
+      (cur.dew != null && cur.t - cur.dew <= 1.5 && minT < 3);
+    var eff = minT - (clearCalm ? 2 : 0);
+    var level = 'none';
+    if (eff <= 0 && wetSurface) level = 'ice';
+    else if (eff <= 0) level = 'frost';
+    else if (eff <= 2) level = 'watch';
+    return { level: level, minT: minT, eff: eff, clearCalm: clearCalm, wetSurface: wetSurface };
+  }
+
+  var WEAR_BANDS = [
+    { max: -5, key: 'arctic', text: 'Heavy winter coat, hat, gloves and a scarf' },
+    { max: 0, key: 'freezing', text: 'Heavy coat, hat and gloves' },
+    { max: 5, key: 'cold', text: 'Warm coat, hat and gloves' },
+    { max: 10, key: 'cool', text: 'Coat with a warm layer underneath' },
+    { max: 15, key: 'mild', text: 'Light jacket or a jumper' },
+    { max: 20, key: 'light', text: 'Long sleeves, with a thin layer for later' },
+    { max: 25, key: 'warm', text: 'T-shirt weather; carry a light layer in case it cools' },
+    { max: Infinity, key: 'hot', text: 'Light, breathable clothes and sun protection' }
+  ];
+
+  /* Walking pace, typical adult. Uses the coldest feels-like of now..+6 h, not just now. */
+  function wear(cur, nc, damp, frost, shift) {
+    shift = shift || 0;
+    var n = nc.next, rawFL = Math.min(cur.fl, n.minFL), fl = rawFL + shift;
+    var band = WEAR_BANDS.filter(function (b) { return fl <= b.max; })[0];
+    var gust = n.gustMax != null ? n.gustMax : cur.gust;
+    var rainLikely = (n.precip != null && n.precip >= 0.3) || (n.popMax != null && n.popMax >= 60 && n.precip != null && n.precip >= 0.1);
+    var rainNow = cur.precip != null && cur.precip >= 0.1;
+    var extras = [];
+    if (rainLikely || rainNow) extras.push(gust != null && gust >= 40 ? 'Waterproof jacket with a hood; gusts are too strong for an umbrella' : 'Waterproof jacket or an umbrella');
+    else if (damp.on) extras.push('A water-resistant outer layer helps in these damp conditions');
+    if (gust != null && gust >= 50) extras.push('Very gusty: secure hat and hood');
+    else if (gust != null && gust >= 35 && !(rainLikely || rainNow)) extras.push('Gusty, so a windproof layer');
+    if (frost.level === 'ice') extras.push('Ice risk on paths and roads: grippy footwear and shorter steps');
+    else if (frost.level === 'frost') extras.push('Frost likely: watch for slippery patches');
+    else if (frost.level === 'watch') extras.push('Near-freezing surfaces possible: take care on shaded paths');
+    return {
+      minFL: rawFL, effFL: fl, shift: shift, minAt: n.minAt, drop: cur.fl - rawFL, band: band.key, base: band.text, extras: extras,
+      rainLikely: rainLikely, gust: gust
+    };
+  }
+
+  function nowReport(pick, y, m, d, h, shift) {
+    var nc = nowcast(pick, y, m, d, h);
+    if (!nc) return null;
+    var damp = dampFlag(nc.cur, nc), frost = frostRisk(nc.cur, nc);
+    return { nc: nc, damp: damp, frost: frost, wear: wear(nc.cur, nc, damp, frost, shift) };
+  }
+
+
+  /* =====================================================================
+     Personal calibration from sensation votes (ASHRAE 7-point: -3 cold ... +3 hot)
+     ===================================================================== */
+  var SENS_PER_DEG = 0.25;   /* ASSUMPTION: scale steps per degree of feels-like at fixed clothing. Not measured for the user. */
+  var MIN_AS = 10;           /* votes "dressed as suggested" before any adjustment is proposed */
+
+  function seeded(seed) { var s = seed >>> 0; return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+  function groupMeans(list, key) {
+    var g = {};
+    list.forEach(function (v) { var k = v[key] || 'unknown'; (g[k] = g[k] || []).push(v.vote); });
+    return Object.keys(g).map(function (k) { return { key: k, n: g[k].length, mean: mean(g[k]) }; }).sort(function (a, b) { return b.n - a.n; });
+  }
+
+  /* votes: [{vote (-3..3), act, band, shift, snap:{fl,...}, ...}]. All valid votes count; clothing is not recorded. Votes are ordered categories, so the mean is a rough summary. */
+  function calibrate(votes, k) {
+    k = k || SENS_PER_DEG;
+    var valid = (votes || []).filter(function (v) { return v && typeof v.vote === 'number' && v.vote >= -3 && v.vote <= 3; });
+    var out = { n: valid.length, k: k, ok: false, min: MIN_AS, byAct: groupMeans(valid, 'act') };
+    if (valid.length < MIN_AS) return out;
+    var vals = valid.map(function (v) { return v.vote; }), n = vals.length, m = mean(vals);
+    var rnd = seeded(12345), means = [], b, i, s;
+    for (b = 0; b < 400; b++) { s = 0; for (i = 0; i < n; i++) s += vals[Math.floor(rnd() * n)]; means.push(s / n); }
+    means.sort(function (x, y) { return x - y; });
+    out.ok = true; out.mean = m; out.p10 = means[40]; out.p90 = means[359];
+    out.shift = Math.max(-4, Math.min(4, Math.round(m / k * 2) / 2));
+    out.significant = (out.p10 > 0 || out.p90 < 0) && Math.abs(out.shift) >= 0.5;
+    return out;
+  }
+
+  var CSV_COLS = ['ts_utc', 'local_time', 'place', 'lat', 'lon', 'activity', 'vote', 'feels_like', 'air_temp', 'wind_kmh', 'gust_kmh',
+    'rain_6h_mm', 'rain_next6h_mm', 'dew_point', 'humidity', 'damp', 'frost', 'band', 'coldest_fl_next6h', 'shift_applied'];
+  function votesToCSV(votes) {
+    var q = function (v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var rows = [CSV_COLS.join(',')];
+    (votes || []).forEach(function (v) {
+      var sn = v.snap || {}, pl = v.place || {};
+      rows.push([v.ts, v.local, pl.name, pl.lat, pl.lon, v.act, v.vote, sn.fl, sn.t, sn.wind, sn.gust, sn.rain6, sn.rainNext6,
+        sn.dew, sn.rh, sn.damp, sn.frost, v.band, sn.minFL, v.shift].map(q).join(','));
+    });
+    return rows.join('\n');
+  }
+
   var api = {
+    calibrate: calibrate, votesToCSV: votesToCSV, SENS_PER_DEG: SENS_PER_DEG, MIN_AS: MIN_AS,
+    nowcast: nowcast, dampFlag: dampFlag, frostRisk: frostRisk, wear: wear, nowReport: nowReport,
     pad: pad, isLeap: isLeap, describeCode: describeCode, pastTargets: pastTargets, pickHour: pickHour,
     tempPenalty: tempPenalty, rainPenalty: rainPenalty, windPenalty: windPenalty, cloudPenalty: cloudPenalty,
     comfort: comfort, verdictFor: verdictFor, compare: compare,
