@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Weather vs. the last 5 years</title>
+<meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1217" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Weather">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <button id="place-btn" class="place" type="button" aria-label="Change place">
+    <span class="pin" aria-hidden="true">📍</span>
+    <span><span id="place-name">Choose a place</span><small id="when"></small></span>
+  </button>
+  <div class="tools">
+    <button id="units" type="button" aria-label="Switch units">°C</button>
+    <button id="refresh" type="button" aria-label="Refresh">↻</button>
+  </div>
+</header>
+
+<main>
+  <p id="status" class="status" role="status" hidden></p>
+
+  <div id="content" hidden>
+    <section id="hero" class="card hero"></section>
+
+    <section id="verdict" class="card verdict"></section>
+
+    <section class="card">
+      <h3>Feels-like at this date and hour</h3>
+      <div id="band"></div>
+      <ul id="years" class="years"></ul>
+      <p class="fine">Score bar = comfort 0–100. The Today row uses the hourly value for this hour, so it is like-for-like with past years and may differ slightly from the live reading above. <span id="updated"></span></p>
+    </section>
+
+    <details class="card how">
+      <summary>How the comparison works</summary>
+      <ul>
+        <li>For each of the previous 5 years, it takes the <b>same calendar date and the same local hour</b> at your location.</li>
+        <li>Comfort score starts at 100. Feels-like loses 4 points per °C below 18°C and 6 per °C above 24°C. Rain at this hour costs 10–25 points, strong wind (over 25 km/h) up to 15, and daytime cloud up to 8.</li>
+        <li>Today is compared with the 5-year average score: within 5 points is "about typical", 5–15 "better/worse", over 15 "much".</li>
+        <li><b>Limits:</b> five single-hour snapshots are a small, noisy sample, so a verdict says how today compares with those five days, not the climate. Today comes from forecast models and the past from ERA5 reanalysis, so small differences (about 1°C) may be model offset rather than real change. The score weights are a judgement, not a standard.</li>
+      </ul>
+    </details>
+
+    <p class="fine credit">Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> (history: Copernicus ERA5). Place names by BigDataCloud. Free, non-commercial use.</p>
+  </div>
+</main>
+
+<div id="sheet" class="sheet" hidden>
+  <div class="panel">
+    <div class="ph"><h2>Choose a place</h2><button id="close" type="button" aria-label="Close">✕</button></div>
+    <p id="place-msg" class="msg" hidden></p>
+    <button id="gps" class="primary" type="button">📍 Use my location</button>
+    <label class="srch"><span>Or search for a city</span>
+      <input id="q" type="search" inputmode="search" autocomplete="off" autocapitalize="words" placeholder="e.g. Dublin">
+    </label>
+    <ul id="results" class="results"></ul>
+  </div>
+</div>
+
+<script src="logic.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
