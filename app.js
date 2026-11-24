@@ -15,7 +15,7 @@
 
   var $ = function (id) { return document.getElementById(id); };
   var state = { place: null, units: 'metric', data: null, loading: false, pending: false, lastFetch: 0,
-    votes: [], cal: { shift: 0 }, draft: { vote: null, act: 'walking' }, calMsg: '', confirmClear: false, csv: '' };
+    votes: [], cal: { shift: 0 }, draft: { vote: null, act: 'walking' }, cast: 'deity', calMsg: '', confirmClear: false, csv: '' };
 
   /* ---------- storage (may throw in private mode) ---------- */
   function sget(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
@@ -310,6 +310,23 @@
   }
   var FROST_TEXT = { ice: 'Ice risk', frost: 'Frost likely', watch: 'Frost possible', none: 'No frost or ice risk' };
 
+  /* walking weather character, picked from the sprite sheet for the current conditions */
+  function castFor(d, c) {
+    var n = d.now, cur = n && n.nc && n.nc.cur;
+    return S.character(state.cast, {
+      code: c.weather_code, isDay: c.is_day, gust: cur ? cur.gust : null, wind: c.wind_speed_10m, fl: c.apparent_temperature,
+      frost: n ? n.frost.level : 'none', precip: c.precipitation, cloud: c.cloud_cover
+    });
+  }
+  function walker(d, c) {
+    var k = castFor(d, c);
+    return '<div class="walker" aria-hidden="true"><div class="sprite ' + k.set + '" style="background-position-y:' + (-64 * k.row) + 'px"></div></div>';
+  }
+  function castLine(d, c) {
+    var k = castFor(d, c);
+    return '<div class="cast"><span>' + esc(k.name) + ' · ' + esc(k.tag) + '</span><button type="button" class="linkbtn" id="castbtn">' + (k.set === 'deity' ? 'Switch to beasts' : 'Switch to deities') + '</button></div>';
+  }
+
   function renderNow(d) {
     var n = d.now;
     if (!n) { $('wear').innerHTML = ''; $('wear').className = ''; $('cond').innerHTML = ''; $('cond').className = ''; return; }
@@ -354,9 +371,9 @@
     $('hero').innerHTML =
       '<div class="scene"><div class="ico">' + S.weather(c.weather_code, c.is_day, 5, esc(desc.text)) + '</div>' +
       '<div class="big"><span class="lab">' + (hs ? 'Feels like to you' : 'Feels like') + '</span><span class="num">' + T(c.apparent_temperature + hs) + '</span></div>' +
-      '<div class="ground"></div></div>' +
+      '<div class="ground"></div>' + walker(d, c) + '</div>' +
       '<div class="dlg"><div class="cond">' + esc(desc.text) + ' · air ' + T(c.temperature_2m) + (hs ? ' · standard feels-like ' + T(c.apparent_temperature) : '') + '</div>' +
-      '<div class="chips"><span>' + ico('wind', 2) + W(c.wind_speed_10m) + '</span><span>' + ico('drop', 2) + (c.relative_humidity_2m == null ? '–' : Math.round(c.relative_humidity_2m) + '%') + '</span><span>' + ico('cloud', 2) + Math.round(c.cloud_cover) + '%</span><span>' + ico('rain', 2) + R(c.precipitation) + '</span></div></div>';
+      '<div class="chips"><span>' + ico('wind', 2) + W(c.wind_speed_10m) + '</span><span>' + ico('drop', 2) + (c.relative_humidity_2m == null ? '–' : Math.round(c.relative_humidity_2m) + '%') + '</span><span>' + ico('cloud', 2) + Math.round(c.cloud_cover) + '%</span><span>' + ico('rain', 2) + R(c.precipitation) + '</span></div>' + castLine(d, c) + '</div>';
 
     renderNow(d);
 
@@ -569,6 +586,7 @@
       state.votes = vs.filter(function (v) { return v && !('wore' in v); });   /* v1 votes recorded clothing; dropped by design */
       if (state.votes.length !== vs.length) sset('wx.votes', state.votes);
     }
+    var ct = sget('wx.cast'); if (ct === 'deity' || ct === 'beast') state.cast = ct;
     var cl = sget('wx.cal'); if (cl && typeof cl.shift === 'number') state.cal = cl;
     var last = sget('wx.last');
     if (last && last.v === DATA_VERSION && state.place && last.place && last.place.lat === state.place.lat && last.place.lon === state.place.lon) state.data = last;
@@ -581,6 +599,7 @@
     $('q').addEventListener('input', function (e) { clearTimeout(searchTimer); var v = e.target.value; searchTimer = setTimeout(function () { search(v); }, 300); });
     document.addEventListener('click', function (e) {
       if (e.target.closest('#logbtn')) { openVote(); return; }
+      if (e.target.closest('#castbtn')) { state.cast = state.cast === 'deity' ? 'beast' : 'deity'; sset('wx.cast', state.cast); render(); return; }
       var b = e.target.closest('#cal [data-do]'); if (b) calAction(b.getAttribute('data-do'));
     });
     $('vclose').addEventListener('click', closeVote);

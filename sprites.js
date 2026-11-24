@@ -136,7 +136,55 @@
     return out + '</svg>';
   }
 
+  /* ---- weather -> character, from the user's two sprite sheets (64x64 cells, 3 frames, 10 rows each) ---- */
+  var CAST = {
+    deity: [
+      ['Lei Gong', 'thunder deity'], ['Yu Shi', 'rain deity'], ['Qingnu', 'frost and snow'], ['Feng Bo', 'wind deity'], ['Ri Gong', 'sunshine'],
+      ['Hanba', 'drought and heat'], ['Yunzhong Jun', 'lord of the clouds'], ['Gonggong', 'flooding'], ['Jade Emperor', 'fair and calm'], ['Long Wang', 'dragon king, rough sea']
+    ],
+    beast: [
+      ['Azure Dragon', 'spring showers'], ['White Tiger', 'crisp wind'], ['Vermilion Bird', 'extreme heat'], ['Black Tortoise', 'snow and cold snap'], ['Qilin', 'clear skies'],
+      ['Taotie', 'haze and gloom'], ['Xiezhi', 'frost'], ['Nine-tailed Fox', 'sunshower'], ['Winged Dragon', 'thunderstorm'], ['Qiongqi', 'severe gale']
+    ]
+  };
+  /* ctx: {code, isDay, gust, wind, fl, frost ('none'|'watch'|'frost'|'ice'), precip (mm now), cloud (%)} */
+  function character(set, ctx) {
+    var c = ctx || {}, code = c.code, gust = c.gust || 0, wind = c.wind || 0, fl = c.fl;
+    var day = c.isDay !== 0, cloud = c.cloud == null ? 100 : c.cloud;
+    var thunder = code >= 95, snow = (code >= 71 && code <= 77) || code === 85 || code === 86;
+    var rain = (code >= 51 && code <= 67) || (code >= 80 && code <= 82);
+    var heavy = code === 65 || code === 67 || code === 82 || (c.precip || 0) >= 4;
+    var frosty = c.frost === 'frost' || c.frost === 'ice' || (fl != null && fl <= 0);
+    var heat = fl != null && fl >= 27, windy = gust >= 45 || wind >= 30, gale = gust >= 75;
+    var row;
+    if (set === 'beast') {
+      if (gale) row = 9;
+      else if (thunder) row = 8;
+      else if (snow) row = 3;
+      else if (frosty) row = 6;
+      else if (rain) row = (code >= 80 && day && cloud < 70) ? 7 : 0;
+      else if (code === 45 || code === 48 || code === 3) row = 5;
+      else if (windy) row = 1;
+      else if (heat) row = 2;
+      else row = 4;
+    } else {
+      if (gale) row = 9;
+      else if (thunder) row = 0;
+      else if (rain && heavy) row = 7;
+      else if (rain) row = 1;
+      else if (snow || frosty) row = 2;
+      else if (windy) row = 3;
+      else if (heat) row = 5;
+      else if (code === 0 || code === 1) row = day ? 4 : 8;
+      else if (code === 2 || code === 3 || code === 45 || code === 48) row = 6;
+      else row = 8;
+    }
+    var e = CAST[set === 'beast' ? 'beast' : 'deity'][row];
+    return { row: row, name: e[0], tag: e[1], set: set === 'beast' ? 'beast' : 'deity' };
+  }
+
   var api = {
+    character: character, CAST: CAST,
     weather: function (code, isDay, px, label) { return toSVG(weatherGrid(code, isDay), px || 4, 'wsp', label); },
     ui: function (name, px) { return UI[name] ? toSVG(UI[name], px || 2, 'usp u-' + name) : ''; },
     _grid: weatherGrid, _ui: UI
