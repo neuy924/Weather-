@@ -1,5 +1,5 @@
 /* Offline app shell. Weather API calls are never cached here (the app keeps its own last result). */
-var CACHE = 'wx-shell-v1';
+var CACHE = 'wx-shell-v2';
 var SHELL = ['./', 'index.html', 'style.css', 'logic.js', 'app.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {
